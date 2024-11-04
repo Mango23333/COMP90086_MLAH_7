@@ -1,0 +1,40 @@
+SELECT results.hadm_id, results.stay_id, results.min_value AS min_creatinine, results.max_value AS max_creatinine, results.avg_value AS avg_creatinine
+FROM (SELECT icustay1.hadm_id, icustay1.stay_id, icustay1.intime
+      FROM physionet-data.mimiciv_icu.icustays as icustay1
+      INNER JOIN
+        (SELECT admi.hadm_id, MIN(icustay.intime) as min_date
+        FROM physionet-data.mimiciv_icu.icustays as icustay
+        INNER JOIN
+        physionet-data.mimiciv_hosp.admissions as admi
+        ON icustay.hadm_id = admi.hadm_id
+        WHERE (icustay.los >= 1 AND admi.deathtime IS null AND icustay.los <= 10) OR
+              (admi.deathtime <= icustay.outtime AND icustay.los >= 1 AND icustay.los <= 10) OR 
+              (icustay.los >= 1 AND icustay.los <= 10 AND admi.deathtime > icustay.outtime)
+        GROUP BY admi.hadm_id) AS hadm
+      ON icustay1.hadm_id = hadm.hadm_id AND icustay1.intime = hadm.min_date) AS target_patient1
+INNER JOIN
+  (SELECT ce.hadm_id, ce.stay_id, MIN(ce.valuenum) AS min_value, MAX(ce.valuenum) AS max_value, AVG(ce.valuenum) AS avg_value
+  FROM physionet-data.mimiciv_icu.chartevents AS ce
+  INNER JOIN
+    (SELECT icustay1.hadm_id, icustay1.stay_id, icustay1.intime
+    FROM physionet-data.mimiciv_icu.icustays as icustay1
+    INNER JOIN
+      (SELECT admi.hadm_id, MIN(icustay.intime) as min_date
+      FROM physionet-data.mimiciv_icu.icustays as icustay
+      INNER JOIN
+      physionet-data.mimiciv_hosp.admissions as admi
+      ON icustay.hadm_id = admi.hadm_id
+      WHERE (icustay.los >= 1 AND admi.deathtime IS null AND icustay.los <= 10) OR
+            (admi.deathtime <= icustay.outtime AND icustay.los >= 1 AND icustay.los <= 10) OR 
+            (icustay.los >= 1 AND icustay.los <= 10 AND admi.deathtime > icustay.outtime)
+      GROUP BY admi.hadm_id) AS hadm
+    ON icustay1.hadm_id = hadm.hadm_id AND icustay1.intime = hadm.min_date) AS target_patient
+  ON ce.hadm_id = target_patient.hadm_id OR ce.stay_id = target_patient.stay_id
+  INNER JOIN
+  physionet-data.mimiciv_hosp.admissions as admi1
+  ON admi1.hadm_id = target_patient.hadm_id
+  WHERE (ce.itemid = 220615) AND -- replace itemid with desired item
+        ((target_patient.stay_id IS NOT NULL AND ce.charttime - target_patient.intime <= INTERVAL 1 DAY) OR 
+        (target_patient.stay_id IS NULL AND ce.charttime - admi1.admittime <= INTERVAL 1 DAY))
+  GROUP BY ce.hadm_id, ce.stay_id) AS results
+ON target_patient1.stay_id = results.stay_id
